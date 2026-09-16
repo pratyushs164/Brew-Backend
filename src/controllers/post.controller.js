@@ -187,6 +187,7 @@ export const getPublishedPosts = async function (req, res, next) {
 // get post by slug
 export const getPostBySlug = async function (req, res, next) {
   try {
+    let currUser = req.user ? req.user._id : null;
     const { slug } = req.params;
 
     const post = await Post.aggregate([
@@ -220,13 +221,14 @@ export const getPostBySlug = async function (req, res, next) {
         $lookup: {
           from: "follows",
 
-          let: { authorId: "$author._id" },
+          let: { authorId: "$author._id", userId: currUser },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$followerId", req.user._id] },
+                    { $ne: ["$$userId", null] },
+                    { $eq: ["$followerId", "$$userId"] },
                     { $eq: ["$followingId", "$$authorId"] },
                   ],
                 },
@@ -241,6 +243,35 @@ export const getPostBySlug = async function (req, res, next) {
         $set: {
           "author.isFollowing": {
             $gt: [{ $size: "$followData" }, 0],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "postvotes",
+
+          let: { postId: "$_id", userId: currUser },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $ne: ["$$userId", null] },
+                    { $eq: ["$postId", "$$postId"] },
+                    { $eq: ["$userId", "$$userId"] },
+                  ],
+                },
+              },
+            },
+          ],
+
+          as: "postVoteData",
+        },
+      },
+      {
+        $set: {
+          userVote: {
+            $first: "$postVoteData.voteType",
           },
         },
       },

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { verifyJWT } from "../middlewares/auth.middleware.js";
+import { optionalJWT, verifyJWT } from "../middlewares/auth.middleware.js";
 import {
   archivePost,
   createPost,
@@ -25,6 +25,6 @@ router
 router.route("/delete-post/:slug").delete(verifyJWT, deletePost);
 router.route("/user-posts").get(verifyJWT, getMyPosts);
 router.route("/published-posts").get(getPublishedPosts);
-router.route("/get-post/:slug").get(verifyJWT, getPostBySlug);
+router.route("/get-post/:slug").get(optionalJWT, getPostBySlug);
 
 export default router;

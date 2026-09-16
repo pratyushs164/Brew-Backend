@@ -24,4 +24,24 @@ const verifyJWT = async function (req, res, next) {
   }
 };
 
-export { verifyJWT };
+const optionalJWT = async function (req, res, next) {
+  try {
+    const token = req.cookies.accessToken;
+    let user;
+    if (!token) {
+      user = null;
+    } else {
+      const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+      user = await User.findById(decodedToken?._id).select(
+        "-passwordHash -refreshToken",
+      );
+    }
+    req.user = user;
+    next();
+  } catch (error) {
+    req.user = null;
+    next(error);
+  }
+};
+
+export { verifyJWT, optionalJWT };
