@@ -20,7 +20,7 @@ export const createPost = async function (req, res, next) {
       // console.log(req.file);
       uploadedCoverImage = await uploadOnCloudinary(coverImageLocalPath);
       if (!uploadedCoverImage) {
-        throw new ApiError(400, "Failted to upload cover Image");
+        throw new ApiError(500, "Failted to upload cover Image");
       }
     }
     const postId = new mongoose.Types.ObjectId();
@@ -220,7 +220,6 @@ export const getPostBySlug = async function (req, res, next) {
       {
         $lookup: {
           from: "follows",
-
           let: { authorId: "$author._id", userId: currUser },
           pipeline: [
             {
@@ -235,7 +234,6 @@ export const getPostBySlug = async function (req, res, next) {
               },
             },
           ],
-
           as: "followData",
         },
       },
@@ -284,6 +282,24 @@ export const getPostBySlug = async function (req, res, next) {
       message: "Post Info Fetched Successfully",
       post: post[0],
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+//get my post by slug
+export const getMyPostBySlug = async function (req, res, next) {
+  try {
+    const user = req.user._id;
+    const { slug } = req.params;
+
+    const post = await Post.findOne({ slug, authorId: user });
+    if (!post) {
+      throw new ApiError(404, "Post does not exist");
+    }
+    res
+      .status(200)
+      .json({ success: true, message: "Post fetched successfuly", post });
   } catch (error) {
     next(error);
   }

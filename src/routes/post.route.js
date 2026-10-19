@@ -9,6 +9,7 @@ import {
   getPostBySlug,
   updatePost,
   deletePost,
+  getMyPostBySlug,
 } from "../controllers/post.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
 
@@ -26,5 +27,6 @@ router.route("/delete-post/:slug").delete(verifyJWT, deletePost);
 router.route("/user-posts").get(verifyJWT, getMyPosts);
 router.route("/published-posts").get(getPublishedPosts);
 router.route("/get-post/:slug").get(optionalJWT, getPostBySlug);
+router.route("/user-post/:slug").get(verifyJWT, getMyPostBySlug);
 
 export default router;

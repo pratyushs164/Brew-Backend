@@ -27,11 +27,15 @@ const updatePassword = async function (req, res, next) {
 };
 
 const getCurrentUser = async function (req, res, next) {
-  const user = await User.findById(req.user._id).select("-passwordHash");
-  if (!user) {
-    throw new ApiError(400, "User not found");
+  try {
+    const user = await User.findById(req.user._id).select("-passwordHash");
+    if (!user) {
+      throw new ApiError(401, "User not found");
+    }
+    res.status(200).json(user);
+  } catch (error) {
+    next(error);
   }
-  res.status(200).json(user);
 };
 
 const updateUserDetails = async function (req, res, next) {

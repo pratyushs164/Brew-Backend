@@ -17,7 +17,7 @@ const registerUser = async function (req, res, next) {
       $or: [{ username }, { email }],
     });
     if (existUser) {
-      throw new ApiError(404, "User already exist");
+      throw new ApiError(409, "User already exist");
     }
 
     const avatarLocalPath = req.files?.avatar?.[0]?.path;
@@ -27,7 +27,7 @@ const registerUser = async function (req, res, next) {
     }
     const avatar = await uploadOnCloudinary(avatarLocalPath);
     if (!avatar) {
-      throw new ApiError(407, "Upload an avatar");
+      throw new ApiError(500, "Upload an avatar");
     }
 
     const user = await User.create({
@@ -41,10 +41,10 @@ const registerUser = async function (req, res, next) {
       "-passwordHash -refreshToken",
     );
     if (!createdUser) {
-      throw new ApiError(407, "Error while creating user");
+      throw new ApiError(500, "Error while creating user");
     }
 
-    return res.status(202).json(createdUser);
+    return res.status(201).json(createdUser);
   } catch (error) {
     next(error);
     console.log(error.message);
@@ -67,40 +67,47 @@ const generateAccessAndRefreshToken = async function (userId) {
 
     return { accessToken, refreshToken };
   } catch (error) {
-    throw new ApiError(
-      400,
-      `Cannot Generate Access token and refresh token: ${error.message}`,
-    );
+    next(error);
   }
 };
 
 const loginUser = async function (req, res, next) {
   try {
-    const { username, email, password } = req.body;
+    const { cred, password } = req.body;
 
-    if (!username && !email) {
-      throw new ApiError(404, "Username or email required");
+    if (!cred) {
+      throw new ApiError(400, "Username or email required");
     }
 
     if (!password || (typeof password === "string" && password.trim() === "")) {
-      throw new ApiError(404, "Password not provided");
+      throw new ApiError(400, "Password not provided");
     }
-    const user = await User.findOne({
-      $or: [{ username }, { email }],
-    });
+    let user;
+    if (cred.includes("@")) {
+      user = await User.findOne({ email: cred });
+    } else {
+      user = await User.findOne({ username: cred });
+    }
+
     if (!user) {
-      throw new ApiError(404, "User does not exist");
+      throw new ApiError(401, "User does not exist");
     }
 
     const isPaswordValid = await user.isPasswordCorrect(password);
     if (!isPaswordValid) {
-      throw new ApiError(404, "Incorrect Password");
+      throw new ApiError(401, "Incorrect Password");
     }
 
     const { accessToken, refreshToken } = await generateAccessAndRefreshToken(
       user._id,
     );
 
+    if (!accessToken || !refreshToken) {
+      throw new ApiError(
+        500,
+        "Error while geenerating access or refresh token",
+      );
+    }
     const options = {
       httpOnly: true,
       secure: true,
@@ -116,7 +123,6 @@ const loginUser = async function (req, res, next) {
       .cookie("refreshToken", refreshToken, options)
       .json({ user: loggedInUser, refreshToken, accessToken });
   } catch (error) {
-    throw new ApiError(400, `Error while logging in user: ${error.message}`);
     next(error);
   }
 };
@@ -154,7 +160,7 @@ const refreshAccessToken = async function (req, res, next) {
     const incomingRefreshToken =
       req.cookies?.refreshToken || req.body?.refreshToken;
     if (!incomingRefreshToken) {
-      throw new ApiError(404, "Invalid Refresh Token");
+      throw new ApiError(401, "Invalid Refresh Token");
     }
 
     const decodedToken = jwt.verify(
@@ -164,11 +170,11 @@ const refreshAccessToken = async function (req, res, next) {
 
     const user = await User.findById(decodedToken?._id);
     if (!user) {
-      throw new ApiError(400, "No user Found");
+      throw new ApiError(401, "No user Found");
     }
 
     if (incomingRefreshToken !== user.refreshToken) {
-      throw new ApiError(404, "Refresh Token has expired");
+      throw new ApiError(401, "Refresh Token has expired");
     }
 
     const { accessToken, refreshToken } = await generateAccessAndRefreshToken(
@@ -181,15 +187,11 @@ const refreshAccessToken = async function (req, res, next) {
     };
 
     res
-      .status(202)
+      .status(200)
       .cookie("accessToken", accessToken, options)
       .cookie("refreshToken", refreshToken, options)
       .json({ accessToken, refreshToken });
   } catch (error) {
-    throw new ApiError(
-      404,
-      `Error while refreshing access token: ${error.message}`,
-    );
     next(error);
   }
 };
