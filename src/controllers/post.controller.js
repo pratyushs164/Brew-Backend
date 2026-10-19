@@ -329,8 +329,8 @@ export const updatePost = async function (req, res, next) {
     const coverImageLocalPath = req.file?.path;
 
     if (coverImageLocalPath) {
-      uploadedCoverImage = await uploadOnCloudinary(coverImageLocalPath);
-      if (!coverImage) {
+      const uploadedCoverImage = await uploadOnCloudinary(coverImageLocalPath);
+      if (!uploadedCoverImage) {
         throw new ApiError(400, "Failed to upload Image");
       }
       updates.coverImage = uploadedCoverImage.url;
