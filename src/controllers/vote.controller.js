@@ -10,11 +10,15 @@ export const votePost = async function (req, res, next) {
     if (!voteType) {
       throw new ApiError(400, "Vote Type is Required");
     }
+
+    if (voteType !== "upvote" && voteType !== "downvote") {
+      throw new ApiError(400, "Return a valid vote type");
+    }
     if (!slug) {
       throw new ApiError(400, "Slug not found");
     }
 
-    const post = await Post.findOne({ slug });
+    const post = await Post.findOne({ slug, status: "published" });
     if (!post) {
       throw new ApiError(400, "No Post found");
     }
@@ -122,9 +126,29 @@ export const votePost = async function (req, res, next) {
       }
     }
 
-    res
-      .status(201)
-      .json({ success: true, message: "Successfully voted", post });
+    const [updatedPost, currentVote] = await Promise.all([
+      Post.findById(post._id).select("upvotesCount downvotesCount"),
+
+      PostVote.findOne({
+        postId: post._id,
+        userId: req.user._id,
+      }).select("voteType"),
+    ]);
+
+    if (!updatedPost) {
+      throw new ApiError(404, "Post not found");
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Vote updated successfully",
+      data: {
+        postId: post._id,
+        upvotesCount: updatedPost.upvotesCount,
+        downvotesCount: updatedPost.downvotesCount,
+        userVote: currentVote?.voteType ?? null,
+      },
+    });
   } catch (error) {
     next(error);
   }

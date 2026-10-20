@@ -174,7 +174,7 @@ export const getPublishedPosts = async function (req, res, next) {
 
     const totalPosts = await Post.countDocuments({ status: "published" });
 
-    const totalPages = totalPosts / limit;
+    const totalPages = Math.ceil(totalPosts / limit);
     res.status(200).json({
       success: true,
       message: "Fetched the post successfully",
