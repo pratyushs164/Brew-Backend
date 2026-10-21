@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Comment } from "../models/comment.model.js";
 import { CommentLike } from "../models/commentLike.model.js";
 import { Post } from "../models/post.model.js";
@@ -310,21 +311,26 @@ export const likeComment = async function (req, res, next) {
       throw new ApiError(400, "There was an error liking the comment");
     }
 
-    const updateCount = await Comment.updateOne(
-      { _id: commentId },
+    const updatedComment = await Comment.findByIdAndUpdate(
+      commentId,
       {
         $inc: { likeCount: 1 },
       },
-    );
+      { new: true },
+    ).select("likeCount");
 
-    if (!updateCount) {
-      throw new ApiError(400, "Error while updating like count");
+    if (!updatedComment) {
+      throw new ApiError(404, "Error while updating like count");
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "successfuly liked the comment",
-      updateCount,
+      message: "Successfully liked the comment",
+      data: {
+        commentId,
+        likeCount: updatedComment.likeCount,
+        isLiked: true,
+      },
     });
   } catch (error) {
     next(error);
@@ -350,16 +356,26 @@ export const unlikeComment = async function (req, res, next) {
     if (!unlike) {
       throw new ApiError(404, "Error while unliking");
     }
-    const updateCount = await Comment.updateOne(
-      { _id: commentId },
-      { $inc: { likeCount: -1 } },
-    );
-    if (!updateCount) {
-      throw new ApiError(400, "Error while updating like count");
+    const updatedComment = await Comment.findByIdAndUpdate(
+      commentId,
+      {
+        $inc: { likeCount: -1 },
+      },
+      { new: true },
+    ).select("likeCount");
+
+    if (!updatedComment) {
+      throw new ApiError(404, "Error while updating like count");
     }
-    res
-      .status(200)
-      .json({ success: true, message: "Successfully unliked", updateCount });
+    return res.status(200).json({
+      success: true,
+      message: "Successfully liked the comment",
+      data: {
+        commentId,
+        likeCount: updatedComment.likeCount,
+        isLiked: false,
+      },
+    });
   } catch (error) {
     next(error);
   }

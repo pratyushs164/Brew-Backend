@@ -7,14 +7,16 @@ import {
   likeComment,
   unlikeComment,
 } from "../controllers/comment.controller.js";
-import { verifyJWT } from "../middlewares/auth.middleware.js";
+import { optionalJWT, verifyJWT } from "../middlewares/auth.middleware.js";
 
 const router = new Router();
 
 router.route("/:slug/comment/create").post(verifyJWT, createComment);
 router.route("/:slug/comment/:commentId/reply").post(verifyJWT, createComment);
-router.route("/:slug/comment/get-comments").get(getComments);
-router.route("/:slug/comment/:commentId/get-reply").get(getComments);
+router.route("/:slug/comment/get-comments").get(optionalJWT, getComments);
+router
+  .route("/:slug/comment/:commentId/get-reply")
+  .get(optionalJWT, getComments);
 router
   .route("/:slug/comment/:commentId/edit-comment")
   .patch(verifyJWT, editComment);
