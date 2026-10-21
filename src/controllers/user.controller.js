@@ -167,7 +167,7 @@ const followUser = async function (req, res, next) {
     }
 
     if (targetUser._id.equals(req.user._id)) {
-      throw new ApiError(400, "Cannot follow yourself");
+      throw new ApiError(403, "Cannot follow yourself");
     }
 
     const followRelationship = await Follow.findOne({
@@ -186,10 +186,19 @@ const followUser = async function (req, res, next) {
     if (!followRel) {
       throw new ApiError(400, "Error while creating relationship");
     }
+
+    const updatedTargetUser = await User.findByIdAndUpdate(
+      targetUser._id,
+      {
+        $inc: { followersCount: 1 },
+      },
+      { new: true },
+    ).select("followersCount");
     res.status(200).json({
       success: true,
       message: "Successfully followed the user",
       followRel,
+      followersCount: updatedTargetUser.followersCount,
     });
   } catch (error) {
     next(error);
@@ -216,10 +225,20 @@ const unfollowUser = async function (req, res, next) {
     if (!followRelationship) {
       throw new ApiError(400, "You do not follow the user");
     }
+
+    const updatedTargetUser = await User.findByIdAndUpdate(
+      targetUser._id,
+      {
+        $inc: { followersCount: -1 },
+      },
+      { new: true },
+    ).select("followersCount");
+
     res.status(200).json({
       success: true,
-      message: "Unfollowed Successully",
+      message: "Unfollowed Successfully",
       followRelationship,
+      followersCount: updatedTargetUser.followersCount,
     });
   } catch (error) {
     next(error);

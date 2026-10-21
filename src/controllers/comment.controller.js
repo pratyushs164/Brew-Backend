@@ -7,9 +7,11 @@ export const createComment = async function (req, res, next) {
   try {
     const { content } = req.body;
     const { slug, commentId } = req.params;
+
     if (!content || !content.trim()) {
       throw new ApiError(400, "Comment cannot be left Empty");
     }
+
     if (!slug) {
       throw new ApiError(400, "Requested Post Not Found");
     }
@@ -19,11 +21,13 @@ export const createComment = async function (req, res, next) {
       throw new ApiError(404, "Error while finding post");
     }
 
-    const userId = req.user._id;
-    if (!userId) {
-      throw new ApiError(400, "User should be logged in to comment");
+    if (!req.user || !req.user._id) {
+      throw new ApiError(401, "User must be logged in to comment");
     }
+    const userId = req.user._id;
+
     let comment;
+
     if (!commentId) {
       comment = await Comment.create({
         authorId: userId,
@@ -34,21 +38,11 @@ export const createComment = async function (req, res, next) {
     } else {
       const commentPost = await Comment.findById(commentId);
       if (!commentPost) {
-        throw new ApiError(400, "Error while finding the comment to reply on");
+        throw new ApiError(404, "Error while finding the comment to reply on");
       }
 
       if (!commentPost.postId.equals(post._id)) {
         throw new ApiError(400, "Mallicious Reply");
-      }
-
-      const updateCommentCounter = await Post.updateOne(
-        { _id: post._id },
-        {
-          $inc: { commentsCount: 1 },
-        },
-      );
-      if (!updateCommentCounter) {
-        throw new ApiError(400, "Error while updating comments count");
       }
 
       comment = await Comment.create({
@@ -59,9 +53,27 @@ export const createComment = async function (req, res, next) {
       });
     }
 
-    res
-      .status(201)
-      .json({ success: true, message: "Successfully commented", comment });
+    const updatedPost = await Post.findByIdAndUpdate(
+      post._id,
+      {
+        $inc: { commentsCount: 1 },
+      },
+      { new: true },
+    ).select("commentsCount");
+
+    if (!updatedPost) {
+      throw new ApiError(500, "Error while updating comments count");
+    }
+
+    // Include author information in the newly created comment.
+    await comment.populate("authorId", "username fullName avatar");
+
+    return res.status(201).json({
+      success: true,
+      message: "Successfully commented",
+      comment,
+      commentsCount: updatedPost.commentsCount,
+    });
   } catch (error) {
     next(error);
   }
@@ -70,35 +82,161 @@ export const createComment = async function (req, res, next) {
 export const getComments = async function (req, res, next) {
   try {
     const { slug, commentId } = req.params;
+
     if (!slug) {
-      throw new ApiError(404, "No post found");
-    }
-    const post = await Post.findOne({ slug });
-    if (!post) {
-      throw new ApiError(400, "Error while finding the post");
-    }
-    let comments;
-    if (!commentId) {
-      comments = await Comment.find({
-        postId: post._id,
-      });
-      if (!comments) {
-        throw new ApiError(404, "No comments on this post");
-      }
-    } else {
-      comments = await Comment.find({
-        parentId: commentId,
-        postId: post._id,
-      });
-      if (!comments.length) {
-        throw new ApiError(404, "No replies on this comment");
-      }
+      throw new ApiError(400, "Slug parameter required");
     }
 
-    res.status(200).json({
-      status: true,
-      message: "Successfully fetched all the comments",
+    if (commentId && !mongoose.isValidObjectId(commentId)) {
+      throw new ApiError(400, "Invalid comment ID");
+    }
+
+    const post = await Post.findOne({ slug });
+
+    if (!post) {
+      throw new ApiError(404, "Post not found");
+    }
+
+    const currentUserId = req.user?._id
+      ? new mongoose.Types.ObjectId(String(req.user._id))
+      : null;
+
+    const parentId = commentId ? new mongoose.Types.ObjectId(commentId) : null;
+
+    const comments = await Comment.aggregate([
+      // 1. Fetch top-level comments or replies.
+      {
+        $match: {
+          postId: post._id,
+          parentId,
+          deletedAt: null,
+        },
+      },
+
+      // 2. Sort newest first.
+      {
+        $sort: { createdAt: -1 },
+      },
+
+      // 3. Fetch the comment author's information.
+      {
+        $lookup: {
+          from: "users",
+          localField: "authorId",
+          foreignField: "_id",
+          pipeline: [
+            {
+              $project: {
+                username: 1,
+                fullName: 1,
+                avatar: 1,
+              },
+            },
+          ],
+          as: "authorData",
+        },
+      },
+      {
+        $set: {
+          authorId: {
+            $ifNull: [{ $arrayElemAt: ["$authorData", 0] }, null],
+          },
+        },
+      },
+
+      // 4. Count direct, non-deleted replies to each comment.
+      {
+        $lookup: {
+          from: "comments",
+          let: {
+            currentCommentId: "$_id",
+            currentPostId: "$postId",
+          },
+          pipeline: [
+            {
+              $match: {
+                deletedAt: null,
+                $expr: {
+                  $and: [
+                    {
+                      $eq: ["$parentId", "$$currentCommentId"],
+                    },
+                    {
+                      $eq: ["$postId", "$$currentPostId"],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              $count: "count",
+            },
+          ],
+          as: "replyCountData",
+        },
+      },
+      {
+        $set: {
+          repliesCount: {
+            $ifNull: [{ $arrayElemAt: ["$replyCountData.count", 0] }, 0],
+          },
+        },
+      },
+
+      // 5. Find whether the current user liked each comment.
+      {
+        $lookup: {
+          from: "commentlikes",
+          let: {
+            currentCommentId: "$_id",
+            currentUserId,
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $ne: ["$$currentUserId", null] },
+                    {
+                      $eq: ["$commentId", "$$currentCommentId"],
+                    },
+                    {
+                      $eq: ["$userId", "$$currentUserId"],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              $project: { _id: 1 },
+            },
+          ],
+          as: "userLikeData",
+        },
+      },
+      {
+        $set: {
+          isLiked: {
+            $gt: [{ $size: "$userLikeData" }, 0],
+          },
+        },
+      },
+
+      // 6. Remove temporary lookup fields.
+      {
+        $project: {
+          authorData: 0,
+          replyCountData: 0,
+          userLikeData: 0,
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Successfully fetched comments",
       comments,
+      commentsCount: post.commentsCount,
     });
   } catch (error) {
     next(error);
@@ -133,7 +271,7 @@ export const editComment = async function (req, res, next) {
       throw new ApiError(404, "Error while updating the comment");
     }
 
-    res.send(200).json({
+    res.status(200).json({
       success: true,
       message: "Successfully edited the comment",
       updatedComment,
