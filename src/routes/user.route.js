@@ -9,7 +9,7 @@ import {
   updatePassword,
   updateUserDetails,
 } from "../controllers/user.controller.js";
-import { verifyJWT } from "../middlewares/auth.middleware.js";
+import { optionalJWT, verifyJWT } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
@@ -19,7 +19,7 @@ router.route("/update-user").patch(verifyJWT, updateUserDetails);
 router
   .route("/update-avatar")
   .patch(verifyJWT, upload.single("avatar"), updateAvatar);
-router.route("/:username").get(verifyJWT, getUserProfile);
+router.route("/:username").get(optionalJWT, getUserProfile);
 
 router.route("/:username/follow").post(verifyJWT, followUser);
 router.route("/:username/unfollow").delete(verifyJWT, unfollowUser);

@@ -95,16 +95,23 @@ const updateAvatar = async function (req, res, next) {
 
 const getUserProfile = async function (req, res, next) {
   const { username } = req.params;
-  if (!username) {
-    throw new ApiError(400, "Username not found");
+
+  if (!username?.trim()) {
+    throw new ApiError(400, "Username is required");
   }
 
+  // Logged-out visitors have no current user ID.
+  const currentUserId = req.user?._id ?? null;
+
   const profile = await User.aggregate([
+    // 1. Find the requested user.
     {
       $match: {
         username: username.trim().toLowerCase(),
       },
     },
+
+    // 2. Find users who follow this profile.
     {
       $lookup: {
         from: "follows",
@@ -113,6 +120,8 @@ const getUserProfile = async function (req, res, next) {
         as: "followers",
       },
     },
+
+    // 3. Find users this profile follows.
     {
       $lookup: {
         from: "follows",
@@ -121,38 +130,79 @@ const getUserProfile = async function (req, res, next) {
         as: "following",
       },
     },
+
+    // 4. Fetch only published posts written by this user.
+    {
+      $lookup: {
+        from: "posts",
+        let: { profileUserId: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$authorId", "$$profileUserId"] },
+                  { $eq: ["$status", "published"] },
+                ],
+              },
+            },
+          },
+          {
+            $sort: {
+              publishedAt: -1,
+            },
+          },
+          {
+            $project: {
+              title: 1,
+              slug: 1,
+              coverImage: 1,
+              publishedAt: 1,
+              upvotesCount: 1,
+              commentsCount: 1,
+            },
+          },
+        ],
+        as: "publishedPosts",
+      },
+    },
+
+    // 5. Calculate statistics and the current visitor's follow status.
     {
       $addFields: {
         followerCount: { $size: "$followers" },
         followingCount: { $size: "$following" },
+        publishedPostCount: { $size: "$publishedPosts" },
         isFollowed: {
-          $cond: {
-            if: { $in: [req.user?._id, "$followers.followerId"] },
-            then: true,
-            else: false,
-          },
+          $in: [currentUserId, "$followers.followerId"],
         },
       },
     },
+
+    // 6. Return only the fields the profile page needs.
     {
       $project: {
+        _id: 1,
         username: 1,
         fullName: 1,
+        avatar: 1,
+        bio: 1,
         followerCount: 1,
         followingCount: 1,
+        publishedPostCount: 1,
         isFollowed: 1,
-        avatar: 1,
+        publishedPosts: 1,
       },
     },
   ]);
 
-  if (!profile?.length) {
-    throw new ApiError(400, "Profile not found");
+  if (!profile.length) {
+    throw new ApiError(404, "Profile not found");
   }
 
-  res.status(200).json({
+  return res.status(200).json({
     success: true,
-    message: "Profile with followr and following details fetched successfully",
+    message: "Profile fetched successfully",
     profile: profile[0],
   });
 };

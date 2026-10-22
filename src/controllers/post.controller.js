@@ -319,16 +319,20 @@ export const updatePost = async function (req, res, next) {
     const updates = {};
 
     if (title !== undefined) {
-      if (title.trim() == "") {
-        throw new ApiError(400, "Can't leave title field empty");
+      if (title.trim() === "") {
+        throw new ApiError(403, "Can't leave title field empty");
       }
-      updates.title = title;
+      updates.title = title.trim();
     }
     if (content !== undefined) {
-      if (content.trim() == "") {
-        throw new ApiError(400, "Can't leave content field empty");
+      if (content.trim() === "") {
+        throw new ApiError(403, "Can't leave content field empty");
       }
-      updates.content = content;
+      updates.content = content.trim();
+    }
+
+    if (Object.keys(updates).length === 0) {
+      throw new ApiError(400, "No fields provided to update");
     }
 
     const coverImageLocalPath = req.file?.path;
@@ -336,7 +340,7 @@ export const updatePost = async function (req, res, next) {
     if (coverImageLocalPath) {
       const uploadedCoverImage = await uploadOnCloudinary(coverImageLocalPath);
       if (!uploadedCoverImage) {
-        throw new ApiError(400, "Failed to upload Image");
+        throw new ApiError(500, "Failed to upload Image");
       }
       updates.coverImage = uploadedCoverImage.url;
     }
@@ -352,7 +356,7 @@ export const updatePost = async function (req, res, next) {
       { new: true },
     );
     if (!post) {
-      throw new ApiError(400, "No post found");
+      throw new ApiError(404, "No post found");
     }
 
     res
