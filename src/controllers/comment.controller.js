@@ -18,6 +18,7 @@ export const createComment = async function (req, res, next) {
     }
 
     const post = await Post.findOne({ slug });
+
     if (!post) {
       throw new ApiError(404, "Error while finding post");
     }
@@ -25,10 +26,12 @@ export const createComment = async function (req, res, next) {
     if (!req.user || !req.user._id) {
       throw new ApiError(401, "User must be logged in to comment");
     }
+
     const userId = req.user._id;
 
     let comment;
 
+    // 1. Create a top-level comment when commentId is not provided.
     if (!commentId) {
       comment = await Comment.create({
         authorId: userId,
@@ -37,23 +40,44 @@ export const createComment = async function (req, res, next) {
         content: content.trim(),
       });
     } else {
-      const commentPost = await Comment.findById(commentId);
-      if (!commentPost) {
+      // 2. Find the comment the user wants to reply to.
+      const parentComment = await Comment.findById(commentId);
+
+      if (!parentComment) {
         throw new ApiError(404, "Error while finding the comment to reply on");
       }
 
-      if (!commentPost.postId.equals(post._id)) {
-        throw new ApiError(400, "Mallicious Reply");
+      // 3. Ensure the target comment belongs to the requested post.
+      if (!parentComment.postId.equals(post._id)) {
+        throw new ApiError(400, "Malicious Reply");
       }
 
+      // MODIFICATION 1:
+      // Do not allow replies to a comment that has already been deleted.
+      if (parentComment.deletedAt) {
+        throw new ApiError(400, "Cannot reply to a deleted comment");
+      }
+
+      // MODIFICATION 2:
+      // Enforce one-level replies.
+      // A top-level comment has parentId = null.
+      // If parentId exists, this comment is already a reply,
+      // so reject attempts to create a reply to it.
+      if (parentComment.parentId) {
+        throw new ApiError(400, "Replies to replies are not allowed");
+      }
+
+      // 4. Create a reply to the top-level comment.
       comment = await Comment.create({
         authorId: userId,
         postId: post._id,
-        parentId: commentId,
+        parentId: parentComment._id,
         content: content.trim(),
       });
     }
 
+    // 5. Increment the total comment count.
+    // This includes both top-level comments and replies.
     const updatedPost = await Post.findByIdAndUpdate(
       post._id,
       {
@@ -66,7 +90,7 @@ export const createComment = async function (req, res, next) {
       throw new ApiError(500, "Error while updating comments count");
     }
 
-    // Include author information in the newly created comment.
+    // 6. Include author information in the newly created comment.
     await comment.populate("authorId", "username fullName avatar");
 
     return res.status(201).json({
@@ -110,7 +134,12 @@ export const getComments = async function (req, res, next) {
         $match: {
           postId: post._id,
           parentId,
-          deletedAt: null,
+
+          // MODIFICATION 1:
+          // When fetching replies, continue excluding deleted comments.
+          // When fetching top-level comments, allow deleted comments
+          // through temporarily because some may still have active replies.
+          ...(parentId ? { deletedAt: null } : {}),
         },
       },
 
@@ -184,6 +213,22 @@ export const getComments = async function (req, res, next) {
         },
       },
 
+      // MODIFICATION 2:
+      // We now know how many active replies each comment has.
+      //
+      // Keep the comment if:
+      // 1. It has not been deleted, OR
+      // 2. It has at least one non-deleted reply.
+      //
+      // A deleted parent with active replies must remain in the result
+      // so the frontend can display a deleted-comment placeholder.
+      // A deleted comment with no active replies can be excluded.
+      {
+        $match: {
+          $or: [{ deletedAt: null }, { repliesCount: { $gt: 0 } }],
+        },
+      },
+
       // 5. Find whether the current user liked each comment.
       {
         $lookup: {
@@ -224,6 +269,8 @@ export const getComments = async function (req, res, next) {
       },
 
       // 6. Remove temporary lookup fields.
+      // deletedAt is deliberately retained so the frontend can identify
+      // deleted comments and render the appropriate placeholder.
       {
         $project: {
           authorData: 0,
@@ -384,46 +431,68 @@ export const unlikeComment = async function (req, res, next) {
 export const deleteComment = async function (req, res, next) {
   try {
     const { commentId } = req.params;
+
     if (!commentId) {
-      throw new ApiError(404, "Comment id not valid");
-    }
-    // const comment = await Comment.findOne({ _id: commentId });
-    // if (!comment) {
-    //   throw new ApiError(400, "Comment does not exist");
-    // }
-    // if (comment.authorId.equals(req.user?._id)) {
-    //   throw new ApiError(400, "Not a valid User");
-    // }
-    const findComment = await Comment.findById(commentId);
-    if (!findComment) {
-      throw new ApiError(400, "Comment does not exist");
-    }
-    if (findComment.deletedAt) {
-      throw new ApiError(400, " Comment is already deleted");
+      throw new ApiError(400, "Comment ID is required");
     }
 
+    // 1. Find the comment before attempting deletion.
+    const findComment = await Comment.findById(commentId);
+
+    if (!findComment) {
+      throw new ApiError(404, "Comment does not exist");
+    }
+
+    // 2. Prevent an already deleted comment from being deleted again.
+    if (findComment.deletedAt) {
+      throw new ApiError(400, "Comment is already deleted");
+    }
+
+    // MODIFICATION:
+    // Explicitly verify ownership before attempting the update.
+    if (!req.user?._id) {
+      throw new ApiError(401, "User must be logged in");
+    }
+
+    if (!findComment.authorId.equals(req.user._id)) {
+      throw new ApiError(403, "You can only delete your own comment");
+    }
+
+    // 3. Soft-delete the comment instead of removing it permanently.
+    // The deletedAt field allows getComments to identify deleted parents
+    // that still need to be displayed because they have active replies.
     const deletedComment = await Comment.findOneAndUpdate(
-      { _id: commentId, authorId: req.user?._id },
       {
-        deletedAt: new Date(),
+        _id: commentId,
+        authorId: req.user._id,
+        deletedAt: null,
+      },
+      {
+        $set: { deletedAt: new Date() },
       },
       { new: true },
     );
 
     if (!deletedComment) {
-      throw new ApiError(400, "Comment does not exist");
+      throw new ApiError(
+        400,
+        "Comment could not be deleted or is already deleted",
+      );
     }
 
-    const updateCommmentCounter = await Post.updateOne(
+    // 4. Decrement the total comment count by exactly one.
+    // This deletion removes one comment from the active discussion,
+    // regardless of whether it is top-level or a reply.
+    const updateCommentCounter = await Post.updateOne(
       { _id: deletedComment.postId },
       { $inc: { commentsCount: -1 } },
     );
 
-    if (!updateCommmentCounter) {
-      throw new ApiError(400, "Error while updating the comment counter");
+    if (updateCommentCounter.matchedCount === 0) {
+      throw new ApiError(500, "Error while updating the comment counter");
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Successfully soft deleted comment",
       deletedComment,
