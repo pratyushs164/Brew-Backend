@@ -5,17 +5,15 @@ import { connectDB } from "./db/index.js";
 dotenv.config({
   path: "./.env",
 });
+const PORT = process.env.PORT || 8000;
 
 connectDB()
   .then(() => {
-    app.listen(process.env.PORT, () => {
-      console.log(`Listening on port ${process.env.PORT}`);
-    });
-    app.on("error", (error) => {
-      console.log("Error while handling connectDB", error);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server listening on port ${PORT}`);
     });
   })
   .catch((error) => {
-    console.log(error);
-    throw error;
+    console.error("Failed to connect to MongoDB:", error);
+    process.exit(1);
   });
