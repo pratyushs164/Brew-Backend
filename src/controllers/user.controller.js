@@ -88,7 +88,6 @@ const updateAvatar = async function (req, res, next) {
     ).select("-passwordHash");
     res.status(200).json(user);
   } catch (error) {
-    throw new ApiError(400, `error while upfating avatar ${error.message}`);
     next(error);
   }
 };
@@ -160,6 +159,7 @@ const getUserProfile = async function (req, res, next) {
               publishedAt: 1,
               upvotesCount: 1,
               commentsCount: 1,
+              content: 1,
             },
           },
         ],
@@ -243,12 +243,13 @@ const followUser = async function (req, res, next) {
         $inc: { followersCount: 1 },
       },
       { new: true },
-    ).select("followersCount");
+    ).select("followersCount followingCount");
     res.status(200).json({
       success: true,
       message: "Successfully followed the user",
       followRel,
       followersCount: updatedTargetUser.followersCount,
+      followingCount: updatedTargetUser.followingCount,
     });
   } catch (error) {
     next(error);
@@ -282,13 +283,14 @@ const unfollowUser = async function (req, res, next) {
         $inc: { followersCount: -1 },
       },
       { new: true },
-    ).select("followersCount");
+    ).select("followersCount followingCount");
 
     res.status(200).json({
       success: true,
       message: "Unfollowed Successfully",
       followRelationship,
       followersCount: updatedTargetUser.followersCount,
+      followingCount: updatedTargetUser.followingCount,
     });
   } catch (error) {
     next(error);
